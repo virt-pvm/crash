@@ -393,6 +393,8 @@ verify_kaslr_offset(ulong kaslr_offset)
  * In kaslr case, virtual address of the kernel placement goes
  * in this range: ffffffff80000000..ffffffff9fffffff, or
  * __START_KERNEL_map..+512MB
+ * In PIE case, virtual address of the kernel placement can be
+ * in any range, so this won't work.
  *
  * https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
  *
@@ -572,7 +574,7 @@ static int
 calc_kaslr_offset_from_idt(uint64_t idtr, uint64_t pgd, ulong *kaslr_offset, ulong *phys_base)
 {
 	uint64_t idtr_paddr;
-	ulong divide_error_vmcore;
+	ulong divide_error_vmcore, kernel_map_base;
 	int verbose = CRASHDEBUG(1)? 1: 0;
 
 	if (!idtr)
@@ -585,8 +587,9 @@ calc_kaslr_offset_from_idt(uint64_t idtr, uint64_t pgd, ulong *kaslr_offset, ulo
 	/* Now we can calculate kaslr_offset and phys_base */
 	divide_error_vmcore = get_vec0_addr(idtr_paddr);
 	*kaslr_offset = divide_error_vmcore - st->divide_error_vmlinux;
+	kernel_map_base = divide_error_vmcore & _1GB_PAGE_MASK;
 	*phys_base = idtr_paddr -
-		(st->idt_table_vmlinux + *kaslr_offset - __START_KERNEL_map);
+		(st->idt_table_vmlinux + *kaslr_offset - kernel_map_base);
 
 	if (verbose) {
 		fprintf(fp, "calc_kaslr_offset: idtr=%lx\n", idtr);

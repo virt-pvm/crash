@@ -211,6 +211,7 @@ x86_64_init(int when)
 		machdep->flags |= FRAMESIZE_DEBUG;
 		machdep->machspec->irq_eframe_link = UNINITIALIZED;
 		machdep->machspec->irq_stack_gap = UNINITIALIZED;
+		machdep->machspec->kernel_map_base = __START_KERNEL_map;
 		machdep->get_kvaddr_ranges = x86_64_get_kvaddr_ranges;
 		machdep->get_current_task_reg = x86_64_get_current_task_reg;
                 if (machdep->cmdline_args[0])
@@ -414,6 +415,10 @@ x86_64_init(int when)
 			else
 				machdep->machspec->vmalloc_end =
 					machdep->machspec->vmalloc_start_addr + TERABYTES(32) - 1;
+			if (kernel_symbol_exists("vmemory_end"))
+				readmem(symbol_value("vmemory_end"), KVADDR,
+					&machdep->machspec->vmalloc_end,
+					sizeof(ulong), "vmemory_end", FAULT_ON_ERROR);
 			if (kernel_symbol_exists("vmemmap_base")) {
 				readmem(symbol_value("vmemmap_base"), KVADDR,
 					&machdep->machspec->vmemmap_vaddr, sizeof(ulong),
@@ -425,10 +430,14 @@ x86_64_init(int when)
 				machdep->machspec->vmemmap_vaddr = VMEMMAP_VADDR_2_6_31;
 				machdep->machspec->vmemmap_end = VMEMMAP_END_2_6_31;
 			}
-			machdep->machspec->modules_vaddr = __START_KERNEL_map +
+			if (kernel_symbol_exists("kernel_map_base"))
+				readmem(symbol_value("kernel_map_base"), KVADDR,
+					&machdep->machspec->kernel_map_base, sizeof(ulong),
+					"kernel_map_base", FAULT_ON_ERROR);
+			machdep->machspec->modules_vaddr = KERNEL_MAP_BASE +
 				(machdep->machspec->kernel_image_size ?
 				machdep->machspec->kernel_image_size : GIGABYTES(1));
-			machdep->machspec->modules_end = MODULES_END_2_6_31;
+			machdep->machspec->modules_end = KERNEL_MAP_BASE + (MODULES_END_2_6_31 - __START_KERNEL_map);
 		}
 		break;
 
@@ -475,7 +484,14 @@ x86_64_init(int when)
 		}
 		if (STRUCT_EXISTS("cpu_entry_area")) {
 			machdep->machspec->cpu_entry_area_start = CPU_ENTRY_AREA_START;	
-			machdep->machspec->cpu_entry_area_end = CPU_ENTRY_AREA_END;	
+			machdep->machspec->cpu_entry_area_end = CPU_ENTRY_AREA_END;
+			if (kernel_symbol_exists("cpu_entry_area_base")) {
+				readmem(symbol_value("cpu_entry_area_base"), KVADDR,
+						&machdep->machspec->cpu_entry_area_start,
+						sizeof(ulong), "cpu_entry_area_base", FAULT_ON_ERROR);
+				machdep->machspec->cpu_entry_area_end = machdep->machspec->cpu_entry_area_start +
+									(CPU_ENTRY_AREA_END - CPU_ENTRY_AREA_START);
+			}
 		}
 
                 STRUCT_SIZE_INIT(cpuinfo_x86, "cpuinfo_x86");
@@ -1773,8 +1789,8 @@ x86_64_init_kernel_pgd(void)
  */
 ulong x86_64_VTOP(ulong vaddr) 
 {
-	if (vaddr >= __START_KERNEL_map)
-		return ((vaddr) - (ulong)__START_KERNEL_map + machdep->machspec->phys_base);
+	if (vaddr >= KERNEL_MAP_BASE)
+		return ((vaddr) - KERNEL_MAP_BASE + machdep->machspec->phys_base);
 	else
 		return ((vaddr) - PAGE_OFFSET);
 }
@@ -2748,6 +2764,9 @@ x86_64_verify_symbol(const char *name, ulong value, char type)
 	if (!(machdep->flags & KSYMS_START)) {
 		if (STREQ(name, "_text") || STREQ(name, "_stext")) {
 			machdep->flags |= KSYMS_START;
+			if (kt->relocate)
+				machdep->machspec->kernel_map_base =
+					(value - kt->relocate) & _1GB_PAGE_MASK;
 			if (!st->first_ksymbol)
 				st->first_ksymbol = value;
 			return TRUE;
@@ -5995,7 +6014,7 @@ x86_64_display_machine_stats(void)
 	fprintf(fp, "   KERNEL VMALLOC BASE: %lx\n", vt->vmalloc_start);
 	if (machdep->flags & VMEMMAP)
 	fprintf(fp, "   KERNEL VMEMMAP BASE: %lx\n", machdep->machspec->vmemmap_vaddr);
-	fprintf(fp, "      KERNEL START MAP: %lx\n", __START_KERNEL_map);
+	fprintf(fp, "      KERNEL START MAP: %lx\n", KERNEL_MAP_BASE);
 	fprintf(fp, "   KERNEL MODULES BASE: %lx\n", MODULES_VADDR);
 	fprintf(fp, "     KERNEL STACK SIZE: %ld\n", STACKSIZE());
 
@@ -7078,11 +7097,11 @@ static int
 in_START_KERNEL_map(ulong vaddr)
 {
 	if (machdep->machspec->kernel_image_size &&
-	    ((vaddr >= __START_KERNEL_map) && 
-	    (vaddr < (__START_KERNEL_map + machdep->machspec->kernel_image_size))))
+	    ((vaddr >= KERNEL_MAP_BASE) &&
+	    (vaddr < (KERNEL_MAP_BASE + machdep->machspec->kernel_image_size))))
 		return TRUE;
 
-	if ((vaddr >= __START_KERNEL_map) &&
+	if ((vaddr >= KERNEL_MAP_BASE) &&
 	    (vaddr < highest_bss_symbol())) 
 		return TRUE; 
 
@@ -7361,7 +7380,7 @@ x86_64_virt_phys_base(void)
 	    (sp->type == 'D')))
 		return FALSE;
 
-	linux_banner_phys = sp->value - __START_KERNEL_map;
+	linux_banner_phys = sp->value - KERNEL_MAP_BASE;
 
 	if (readmem(linux_banner_phys + machdep->machspec->phys_base,
 	    PHYSADDR, buf, strlen("Linux version"), "linux_banner verify", 

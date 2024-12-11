@@ -3947,6 +3947,7 @@ typedef signed int s32;
 #define VMEMMAP_END     (machdep->machspec->vmemmap_end)
 #define MODULES_VADDR   (machdep->machspec->modules_vaddr)
 #define MODULES_END     (machdep->machspec->modules_end)
+#define KERNEL_MAP_BASE (machdep->machspec->kernel_map_base)
 
 #define __START_KERNEL_map    0xffffffff80000000UL
 #define MODULES_LEN     (MODULES_END - MODULES_VADDR)
@@ -6624,6 +6625,7 @@ struct machine_specific {
 	ulong vmemmap_end;
 	ulong modules_vaddr;
 	ulong modules_end;
+	ulong kernel_map_base;
 	ulong phys_base;
 	char *pml4;
 	char *upml;
